@@ -297,7 +297,8 @@ class Game {
     this._applyQuality();
     r.setEnvironment(env);
     // trees
-    const keys = env.trees.map((t) => t[0]);
+    const lite = document.body.classList.contains('touch'); // phones: skip the two huge tree files (42 MB) for fast loading
+    const keys = env.trees.map((t) => t[0]).filter((k) => !(lite && (k === 'red_oak' || k === 'black_spruce')));
     for (let i = 0; i < keys.length; i++) {
       const k = keys[i];
       if (!this.trees[k]) {

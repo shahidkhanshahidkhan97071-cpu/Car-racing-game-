@@ -167,3 +167,22 @@ kbd { display: inline-block; min-width: 26px; text-align: center; padding: 3px 8
   #hudBR { transform: scale(.8); transform-origin: bottom right; }
   .tile .num { font-size: 40px; }
 }
+
+/* ---------- touch controls ---------- */
+#touch { display: none; }
+body.touch #touch { display: block; }
+body.touch #hintBar, body.touch #tower { display: none; }
+body.touch #hudBR { transform: scale(.55); transform-origin: top right; bottom: auto; top: 150px; right: 8px; }
+body.touch #hudTL { transform: scale(.7); transform-origin: top left; left: 8px; top: 8px; }
+body.touch #hudTR { transform: scale(.7); transform-origin: top right; right: 8px; top: 6px; }
+#touch button { pointer-events: auto; touch-action: none; background: rgba(10,13,20,.55); border: 2px solid rgba(255,255,255,.35); color: #fff; font-weight: 900; font-style: italic; border-radius: 50%; width: 84px; height: 84px; font-size: 26px; backdrop-filter: blur(4px); }
+#touch button.on { background: rgba(255,122,26,.75); }
+#touch .tgrp { position: absolute; display: flex; gap: 14px; align-items: flex-end; }
+#touch .tl { left: 22px; bottom: 22px; }
+#touch .tl button { width: 96px; height: 96px; }
+#touch .tr { right: 22px; bottom: 22px; flex-wrap: wrap; justify-content: flex-end; max-width: 330px; }
+#touch .tr .gas { width: 110px; height: 110px; background: rgba(40,200,110,.5); }
+#touch .tr .sm { width: 66px; height: 66px; font-size: 12px; }
+#touch .tr .nit { background: rgba(30,140,255,.5); }
+#touch .tt { right: 12px; top: 200px; }
+#touch .tt .sm { width: 50px; height: 50px; font-size: 12px; }

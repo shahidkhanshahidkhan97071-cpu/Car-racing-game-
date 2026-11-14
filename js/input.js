@@ -22,6 +22,14 @@ export class Input {
     });
     addEventListener('keyup', (e) => this.down.delete(e.code));
     addEventListener('blur', () => this.down.clear());
+    document.querySelectorAll('#touch button').forEach((b) => {
+      const k = b.dataset.key;
+      const on = (e) => { e.preventDefault(); if (!this.down.has(k)) this.edge.add(k); this.down.add(k); b.classList.add('on'); };
+      const off = (e) => { e.preventDefault(); this.down.delete(k); b.classList.remove('on'); };
+      b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off);
+      b.addEventListener('pointercancel', off); b.addEventListener('pointerleave', off);
+      b.addEventListener('contextmenu', (e) => e.preventDefault());
+    });
   }
   held(list) { for (const k of list) if (this.down.has(k)) return true; return false; }
   pressed(name) {

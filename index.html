@@ -121,6 +121,11 @@
   <div id="wrongway" class="hidden">WRONG WAY</div>
   <div id="hintBar">W/S throttle·brake &nbsp; A/D steer &nbsp; SPACE drift &nbsp; SHIFT nitro &nbsp; C camera &nbsp; R reset</div>
   <div id="fps"></div>
+  <div id="touch">
+    <div class="tgrp tl"><button data-key="KeyA">◀</button><button data-key="KeyD">▶</button></div>
+    <div class="tgrp tr"><button data-key="Space" class="sm">DRIFT</button><button data-key="ShiftLeft" class="sm nit">NITRO</button><button data-key="KeyS" class="sm">BRAKE</button><button data-key="KeyW" class="gas">GAS</button></div>
+    <div class="tgrp tt"><button data-key="KeyC" class="sm">CAM</button><button data-key="Escape" class="sm">II</button></div>
+  </div>
 </div>
 
 <!-- ============ OVERLAYS ============ -->
@@ -156,6 +161,7 @@
     window.__noStart = true;
   }
 </script>
+<script>if (matchMedia("(pointer:coarse)").matches || "ontouchstart" in window) document.body.classList.add("touch");</script>
 <script type="module" src="js/game.js"></script>
 </body>
 </html>

@@ -13,7 +13,8 @@ import { GameAudio } from './audio.js';
 import { HUD, fmtTime, ordinal } from './ui.js';
 import { FX, drawContactShadow } from './fx.js';
 
-const $ = (id) => document.getElementById(id);
+const _dummy = () => ({ style: {}, classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } }, children: [], textContent: '', innerHTML: '', value: '', disabled: false, dataset: {}, addEventListener() {}, appendChild() {}, removeChild() {}, getContext() { return new Proxy({}, { get: () => () => {}, set: () => true }); }, focus() {}, offsetWidth: 0 });
+const $ = (id) => document.getElementById(id) || _dummy();
 const STEP = 1 / 100;                       // fixed physics step
 const AI_NAMES = ['VIPER', 'NOVA', 'RAVEN', 'BLAZE', 'GHOST', 'TITAN', 'ECHO', 'DRIFTER', 'SPECTRE', 'COMET'];
 const DIFFS = [

@@ -1,5 +1,6 @@
 // HUD + small DOM helpers.
-const $ = (id) => document.getElementById(id);
+const _dummy = () => ({ style: {}, classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } }, children: [], textContent: '', innerHTML: '', value: '', disabled: false, dataset: {}, addEventListener() {}, appendChild() {}, removeChild() {}, getContext() { return new Proxy({}, { get: () => () => {}, set: () => true }); }, focus() {}, offsetWidth: 0 });
+const $ = (id) => document.getElementById(id) || _dummy();
 
 export function fmtTime(t) {
   if (!isFinite(t) || t < 0) return '--:--.--';

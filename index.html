@@ -164,6 +164,13 @@
   }
 </script>
 <script>if (matchMedia("(pointer:coarse)").matches || "ontouchstart" in window) document.body.classList.add("touch");</script>
-<script type="module" src="js/game.js?v=4"></script>
+<script>
+window.addEventListener('error', function (e) {
+  var d = document.getElementById('errbox');
+  if (!d) { d = document.createElement('div'); d.id = 'errbox'; d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:999;background:#7a0010;color:#fff;font:12px monospace;padding:8px;white-space:pre-wrap;max-height:35vh;overflow:auto'; document.body.appendChild(d); }
+  d.textContent += (e.message || 'error') + ' @ ' + String(e.filename || '').split('/').slice(-2).join('/') + ':' + e.lineno + '\n';
+});
+</script>
+<script type="module" src="js/game.js?v=5"></script>
 </body>
 </html>

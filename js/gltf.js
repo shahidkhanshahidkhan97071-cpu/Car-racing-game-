@@ -8,7 +8,11 @@ const COMP = { 5120: Int8Array, 5121: Uint8Array, 5122: Int16Array, 5123: Uint16
 const NCOMP = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 };
 const NORMDIV = { 5120: 127, 5121: 255, 5122: 32767, 5123: 65535 };
 
+export const preloaded = new Map(); // url -> ArrayBuffer (filled by the download screen)
+
 export async function fetchGLB(url, onProgress) {
+  const pre = preloaded.get(url);
+  if (pre) { preloaded.delete(url); if (onProgress) onProgress(1); return parseGLB(pre, url); }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
   const buf = await res.arrayBuffer();

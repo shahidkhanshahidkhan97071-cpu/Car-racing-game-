@@ -3,7 +3,8 @@ import { Renderer, Material, QUALITY_PRESETS } from './renderer.js';
 import { ENVIRONMENTS } from './environments.js';
 import { m4, DEG, clamp, lerp, wrapAngle, damp, smoothstep, mulberry32 } from './math.js';
 import { MeshBuilder } from './gl.js';
-import { loadCar, drawCar, loadTree, PAINTS, paintUniform } from './assets.js';
+import { loadCar, drawCar, loadTree, PAINTS, paintUniform, TREE_SPECS } from './assets.js';
+import { preloaded } from './gltf.js';
 import { Track } from './track.js';
 import { World } from './world.js';
 import { Vehicle, AIDriver, collideVehicles } from './physics.js';
@@ -63,7 +64,7 @@ class Game {
 
   // ------------------------------------------------------------------ boot
   async boot() {
-    const bootMsg = (m, p) => { $('bootMsg').textContent = m; if (p !== undefined) $('bootBar').style.width = (p * 100) + '%'; };
+    const bootMsg = (m, p) => { $('bootMsg').textContent = m; if (p !== undefined) { const w = Math.max(this._bw || 0, p * 100); this._bw = w; $('bootBar').style.width = w + '%'; } };
     bootMsg('Starting renderer…', 0.05);
     try {
       this.r = new Renderer($('c'), this.S.quality);
@@ -79,6 +80,9 @@ class Game {
     try { const res = await fetch('/api/cars'); if (res.ok) files = await res.json(); } catch (e) { /* ignore */ }
     if (!files.length) { try { const res = await fetch('cars/cars.json'); if (res.ok) files = await res.json(); } catch (e) { /* ignore */ } }
     if (!files.length) files = ['lamborghini_asterion.glb'];
+    // ---- download everything up front with a progress screen ----
+    await this._download([...files.map((f) => 'cars/' + f), ...Object.values(TREE_SPECS).map((t) => t.file)]);
+    bootMsg('Preparing cars…', 0.8);
     const q = r.q.maxTexSize;
     r.q.maxTexSize = 2048; // cars always use full-resolution textures
     for (let i = 0; i < files.length; i++) {
@@ -114,6 +118,53 @@ class Game {
     requestAnimationFrame((t) => this.frame(t));
     window.__game = this;
     window.__ready = true;
+  }
+
+  async _download(urls) {
+    const EST = { 'fir_spruce.glb': 4825992, 'red_oak.glb': 24964400, 'black_spruce.glb': 17426872, 'pine_fbx.glb': 5233568, 'pine_b.glb': 3446832 };
+    const mb = (b) => (b / 1048576).toFixed(1);
+    const sizes = await Promise.all(urls.map(async (u) => {
+      try { const h = await fetch(u, { method: 'HEAD' }); const n = +h.headers.get('content-length'); if (n > 0) return n; } catch (e) { /* ignore */ }
+      return EST[u.split('/').pop()] || 2600000;
+    }));
+    const total = sizes.reduce((a, b) => a + b, 0);
+    let loaded = 0, last = performance.now(), lastBytes = 0, speed = 0;
+    const bar = $('bootBar'), msg = $('bootMsg'), bytes = $('bootBytes');
+    const tips = ['Drift through corners to fill your nitro', 'Hold the throttle before GO for a perfect start', 'Press C to change the camera', 'Press R if you get stuck', 'Handbrake + steer = drift'];
+    $('bootTip').textContent = tips[(Math.random() * tips.length) | 0];
+    const ui = (name) => {
+      const now = performance.now();
+      if (now - last > 400) { speed = speed * 0.5 + ((loaded - lastBytes) / ((now - last) / 1000)) * 0.5; last = now; lastBytes = loaded; }
+      const l = Math.min(loaded, total);
+      bar.style.width = ((l / total) * 78 + 4).toFixed(1) + '%';
+      bytes.textContent = `${mb(l)} MB / ${mb(total)} MB  ·  ${Math.floor((l / total) * 100)}%` + (speed > 0 ? `  ·  ${mb(speed)} MB/s` : '');
+      if (name) msg.textContent = 'Downloading ' + name.replace(/\.glb$/, '').replace(/_/g, ' ');
+    };
+    ui('assets');
+    let idx = 0;
+    const worker = async () => {
+      while (idx < urls.length) {
+        const i = idx++;
+        const u = urls[i];
+        const res = await fetch(u);
+        if (!res.ok) throw new Error('Download failed: ' + u);
+        const reader = res.body.getReader();
+        const chunks = []; let got = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value); got += value.length; loaded += value.length; ui(u.split('/').pop());
+        }
+        const buf = new Uint8Array(got); let o = 0;
+        for (const c of chunks) { buf.set(c, o); o += c.length; }
+        preloaded.set(u, buf.buffer);
+        loaded += Math.max(0, sizes[i] - got); // keep the bar exact if sizes differ
+        ui(u.split('/').pop());
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    loaded = total; ui('assets');
+    bytes.textContent = `${mb(total)} MB / ${mb(total)} MB  ·  100%`;
   }
 
   // ------------------------------------------------------------------ showroom
@@ -297,8 +348,7 @@ class Game {
     this._applyQuality();
     r.setEnvironment(env);
     // trees
-    const lite = document.body.classList.contains('touch'); // phones: skip the two huge tree files (42 MB) for fast loading
-    const keys = env.trees.map((t) => t[0]).filter((k) => !(lite && (k === 'red_oak' || k === 'black_spruce')));
+    const keys = env.trees.map((t) => t[0]);
     for (let i = 0; i < keys.length; i++) {
       const k = keys[i];
       if (!this.trees[k]) {

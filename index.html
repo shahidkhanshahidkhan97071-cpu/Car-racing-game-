@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="theme-color" content="#06080c">
+<title>ASPHALT FOREST — Arcade Racing</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- shown if the page was opened by double-clicking index.html (ES modules need a local server) -->
+<div id="filewarn" class="overlay hidden">
+  <div class="card">
+    <h2>Use the launcher</h2>
+    <p>Browsers block game files when <b>index.html</b> is opened directly.<br>
+       Double-click <b>start_game.bat</b> (Windows) &mdash; it starts a tiny local server and opens the game for you.</p>
+    <p class="dim">Mac / Linux: run <code>python3 tools/server.py</code></p>
+  </div>
+</div>
+<div id="nogl" class="overlay hidden">
+  <div class="card">
+    <h2>WebGL 2 not available</h2>
+    <p>Please use an up-to-date Chrome, Edge or Firefox with hardware acceleration enabled.</p>
+  </div>
+</div>
+
+<!-- first load -->
+<div id="boot" class="overlay">
+  <div class="logo big"><span>ASPHALT</span><b>FOREST</b></div>
+  <div class="bar"><i id="bootBar"></i></div>
+  <div id="bootMsg" class="dim">Starting engine…</div>
+</div>
+
+<!-- ============ MENU ============ -->
+<div id="menu" class="screen hidden">
+  <div class="menu-left">
+    <div class="logo"><span>ASPHALT</span><b>FOREST</b></div>
+    <div class="tagline">ARCADE RACING · RUNS IN YOUR BROWSER</div>
+    <nav id="tabs">
+      <button data-tab="race" class="active">RACE</button>
+      <button data-tab="garage">GARAGE</button>
+      <button data-tab="settings">SETTINGS</button>
+      <button data-tab="help">CONTROLS</button>
+    </nav>
+
+    <section id="tab-race" class="panel">
+      <h3>Track</h3>
+      <div id="trackList" class="cards"></div>
+      <div class="opts">
+        <div class="opt"><label>Laps</label><div class="seg" id="segLaps"></div></div>
+        <div class="opt"><label>Opponents</label><div class="seg" id="segOpp"></div></div>
+        <div class="opt"><label>Difficulty</label><div class="seg" id="segDiff"></div></div>
+      </div>
+      <button id="btnStart" class="go">START RACE <i></i></button>
+    </section>
+
+    <section id="tab-garage" class="panel hidden">
+      <h3>Your car</h3>
+      <div class="carname"><button id="carPrev" class="arrow">‹</button><div><div id="carName">—</div><div id="carCount" class="dim"></div></div><button id="carNext" class="arrow">›</button></div>
+      <div id="carStats" class="stats"></div>
+      <h3>Paint</h3>
+      <div id="swatches" class="swatches"></div>
+      <div id="paintName" class="dim"></div>
+      <div class="note">Want more cars? Drop extra <b>.glb</b> files into the <b>cars</b> folder (optional <b>name.json</b> next to it for stats) and restart — they appear here automatically.</div>
+    </section>
+
+    <section id="tab-settings" class="panel hidden">
+      <h3>Graphics</h3>
+      <div class="row"><label>Quality</label><div class="seg" id="segQuality"></div></div>
+      <div class="row"><label>Dynamic resolution</label><div class="seg" id="segDyn"></div></div>
+      <div class="row"><label>Speed effects (blur / shake)</label><div class="seg" id="segFx"></div></div>
+      <div class="row"><label>Speed unit</label><div class="seg" id="segUnit"></div></div>
+      <h3>Audio</h3>
+      <div class="row"><label>Master</label><input type="range" id="volMaster" min="0" max="100"></div>
+      <div class="row"><label>Effects</label><input type="range" id="volSfx" min="0" max="100"></div>
+      <div class="row"><label>Music</label><input type="range" id="volMusic" min="0" max="100"></div>
+      <div class="note dim">Quality changes apply from the next race. Tip: if the game feels slow, choose Medium or Low.</div>
+    </section>
+
+    <section id="tab-help" class="panel hidden">
+      <h3>Keyboard</h3>
+      <table class="keys">
+        <tr><td><kbd>W</kbd> <kbd>↑</kbd></td><td>Accelerate</td></tr>
+        <tr><td><kbd>S</kbd> <kbd>↓</kbd></td><td>Brake / reverse</td></tr>
+        <tr><td><kbd>A</kbd> <kbd>D</kbd> <kbd>←</kbd> <kbd>→</kbd></td><td>Steer</td></tr>
+        <tr><td><kbd>Space</kbd></td><td>Handbrake (drift)</td></tr>
+        <tr><td><kbd>Shift</kbd> <kbd>N</kbd></td><td>Nitro boost</td></tr>
+        <tr><td><kbd>C</kbd></td><td>Change camera</td></tr>
+        <tr><td><kbd>R</kbd></td><td>Reset car on track</td></tr>
+        <tr><td><kbd>Esc</kbd> <kbd>P</kbd></td><td>Pause</td></tr>
+        <tr><td><kbd>M</kbd></td><td>Mute</td></tr>
+      </table>
+      <h3>Gamepad</h3>
+      <div class="note">Left stick steer · RT accelerate · LT brake · X / RB handbrake · A / B nitro · Y camera · Start pause</div>
+      <h3>Tips</h3>
+      <div class="note">Drifting through corners (brake or handbrake while turning) fills your <b>nitro</b>. Release a long drift for a free speed kick. Floor the throttle just before “GO” for a <b>perfect start</b>.</div>
+    </section>
+
+    <div class="menu-foot dim">Drag the mouse to rotate the car · F11 fullscreen</div>
+  </div>
+</div>
+
+<!-- ============ HUD ============ -->
+<div id="hud" class="hidden">
+  <div id="hudTL">
+    <div class="tile" id="posBox"><div class="lbl">POSITION</div><div class="num"><b id="posNum">1</b><span id="posTot">/1</span></div></div>
+    <div class="tile" id="lapBox"><div class="lbl">LAP</div><div class="num sm"><b id="lapNum">1</b><span id="lapTot">/3</span></div></div>
+    <div class="tile" id="timeBox"><div class="lbl">TIME</div><div class="num sm" id="raceTime">0:00.00</div><div class="sub" id="lapTime"></div></div>
+  </div>
+  <div id="tower"></div>
+  <div id="hudTR"><canvas id="minimap" width="300" height="300"></canvas><div id="trackName"></div></div>
+  <div id="hudBR">
+    <canvas id="speedArc" width="440" height="440"></canvas>
+    <div id="speedNum">0</div><div id="speedUnit">KM/H</div><div id="gearNum">N</div>
+    <div id="nitroWrap"><span>NITRO</span><div id="nitroBar"><i id="nitroFill"></i></div></div>
+  </div>
+  <div id="toasts"></div>
+  <div id="countdown"></div>
+  <div id="wrongway" class="hidden">WRONG WAY</div>
+  <div id="hintBar">W/S throttle·brake &nbsp; A/D steer &nbsp; SPACE drift &nbsp; SHIFT nitro &nbsp; C camera &nbsp; R reset</div>
+  <div id="fps"></div>
+</div>
+
+<!-- ============ OVERLAYS ============ -->
+<div id="pause" class="overlay hidden">
+  <div class="card">
+    <h2>PAUSED</h2>
+    <button id="btnResume" class="go small">RESUME</button>
+    <button id="btnRestart" class="ghost">RESTART RACE</button>
+    <button id="btnQuit" class="ghost">QUIT TO MENU</button>
+  </div>
+</div>
+
+<div id="results" class="overlay hidden">
+  <div class="card wide">
+    <div class="res-head"><div id="resTitle">RACE COMPLETE</div><div id="resPlace">1<sup>ST</sup></div></div>
+    <table id="resTable"></table>
+    <div id="resStats" class="dim"></div>
+    <div class="btns"><button id="btnAgain" class="go small">RACE AGAIN</button><button id="btnMenu" class="ghost">MAIN MENU</button></div>
+  </div>
+</div>
+
+<div id="loading" class="overlay hidden">
+  <div class="logo"><span>ASPHALT</span><b>FOREST</b></div>
+  <div id="loadTrack">—</div>
+  <div class="bar"><i id="loadBar"></i></div>
+  <div id="loadMsg" class="dim">Loading…</div>
+</div>
+
+<script>
+  if (location.protocol === 'file:') {
+    document.getElementById('filewarn').classList.remove('hidden');
+    document.getElementById('boot').classList.add('hidden');
+    window.__noStart = true;
+  }
+</script>
+<script type="module" src="js/game.js"></script>
+</body>
+</html>

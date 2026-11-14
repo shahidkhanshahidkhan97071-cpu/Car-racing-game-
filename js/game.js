@@ -64,7 +64,7 @@ class Game {
 
   // ------------------------------------------------------------------ boot
   async boot() {
-    const bootMsg = (m, p) => { $('bootMsg').textContent = m; if (p !== undefined) { const w = Math.max(this._bw || 0, p * 100); this._bw = w; $('bootBar').style.width = w + '%'; } };
+    const bootMsg = (m, p) => { if ($('bootMsg')) $('bootMsg').textContent = m; if (p !== undefined) { const w = Math.max(this._bw || 0, p * 100); this._bw = w; if ($('bootBar')) $('bootBar').style.width = w + '%'; } };
     bootMsg('Starting renderer…', 0.05);
     try {
       this.r = new Renderer($('c'), this.S.quality);
@@ -129,9 +129,10 @@ class Game {
     }));
     const total = sizes.reduce((a, b) => a + b, 0);
     let loaded = 0, last = performance.now(), lastBytes = 0, speed = 0;
-    const bar = $('bootBar'), msg = $('bootMsg'), bytes = $('bootBytes');
+    const dummy = { style: {}, textContent: '' };
+    const bar = $('bootBar') || dummy, msg = $('bootMsg') || dummy, bytes = $('bootBytes') || dummy;
     const tips = ['Drift through corners to fill your nitro', 'Hold the throttle before GO for a perfect start', 'Press C to change the camera', 'Press R if you get stuck', 'Handbrake + steer = drift'];
-    $('bootTip').textContent = tips[(Math.random() * tips.length) | 0];
+    ($('bootTip') || dummy).textContent = tips[(Math.random() * tips.length) | 0];
     const ui = (name) => {
       const now = performance.now();
       if (now - last > 400) { speed = speed * 0.5 + ((loaded - lastBytes) / ((now - last) / 1000)) * 0.5; last = now; lastBytes = loaded; }

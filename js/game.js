@@ -41,6 +41,7 @@ const hslCss = (p) => {
 class Game {
   constructor() {
     this.S = loadSettings();
+    if (document.body.classList.contains('touch') && !this.S.qChosen) this.S.quality = 'mobile'; // phones default to the light preset
     this.state = 'boot';
     this.time = 0;
     this.input = new Input();
@@ -234,7 +235,7 @@ class Game {
     this._seg('segLaps', [1, 2, 3, 5, 8].map((v) => ({ label: v, value: v })), () => S.laps, (v) => { S.laps = +v; save(); });
     this._seg('segOpp', [0, 3, 5, 7].map((v) => ({ label: v, value: v })), () => S.opp, (v) => { S.opp = +v; save(); });
     this._seg('segDiff', DIFFS.map((d, i) => ({ label: d.name, value: i })), () => S.diff, (v) => { S.diff = +v; save(); });
-    this._seg('segQuality', ['low', 'medium', 'high', 'ultra'].map((k) => ({ label: QUALITY_PRESETS[k].name, value: k })), () => S.quality, (v) => { S.quality = v; save(); this._qualityDirty = true; });
+    this._seg('segQuality', ['mobile', 'low', 'medium', 'high', 'ultra'].map((k) => ({ label: QUALITY_PRESETS[k].name, value: k })), () => S.quality, (v) => { S.quality = v; S.qChosen = true; save(); this._qualityDirty = true; });
     this._seg('segDyn', [{ label: 'ON', value: 1 }, { label: 'OFF', value: 0 }], () => (S.dyn ? 1 : 0), (v) => { S.dyn = !!+v; save(); });
     this._seg('segFx', [{ label: 'ON', value: 1 }, { label: 'OFF', value: 0 }], () => (S.fx ? 1 : 0), (v) => { S.fx = !!+v; save(); });
     this._seg('segUnit', [{ label: 'KM/H', value: 'kmh' }, { label: 'MPH', value: 'mph' }], () => S.units, (v) => { S.units = v; save(); });

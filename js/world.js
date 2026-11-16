@@ -551,7 +551,9 @@ export class World {
         const st = shadow ? td.shadowStaging[lod] : td.staging[lod];
         const c = td.counts[lod];
         if (shadow && (c + 1) * 8 > st.length) continue;
-        st.set(arr.subarray(i, i + 8), c * 8);
+        const o = c * 8;
+        st[o] = arr[i]; st[o + 1] = arr[i + 1]; st[o + 2] = arr[i + 2]; st[o + 3] = arr[i + 3];
+        st[o + 4] = arr[i + 4]; st[o + 5] = arr[i + 5]; st[o + 6] = arr[i + 6]; st[o + 7] = arr[i + 7];
         td.counts[lod] = c + 1;
       }
       for (let l = 0; l < m.lods.length; l++) {

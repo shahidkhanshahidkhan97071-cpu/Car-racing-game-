@@ -148,11 +148,11 @@ float shadowFactor(vec3 wp, vec3 N) {
   float cs = cos(ang), sn = sin(ang);
   mat2 rot = mat2(cs, sn, -sn, cs);
   float sum = 0.0;
-  for (int i = 0; i < 12; i++) {
+  for (int i = 0; i < SHADOW_TAPS; i++) {
     vec2 o = rot * POISSON[i] * uShadowParams.x * uShadowParams.w;
     sum += texture(uShadowMap, vec3(q.xy + o, q.z - uShadowParams.z));
   }
-  float s = sum / 12.0;
+  float s = sum / float(SHADOW_TAPS);
   float edge = min(min(q.x, 1.0 - q.x), min(q.y, 1.0 - q.y));
   return mix(1.0, s, smoothstep(0.0, 0.06, edge));
 }

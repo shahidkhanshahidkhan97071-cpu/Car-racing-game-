@@ -8,11 +8,11 @@ import {
 } from './shaders.js';
 
 export const QUALITY_PRESETS = {
-  mobile: { name: 'Mobile', msaa: 0, shadowSize: 1024, shadowRadius: 30, shadowFilter: 1.2, bloom: false, bloomLevels: 3, renderScale: 0.6, dprCap: 1, aniso: 1, maxTexSize: 512, treeDensity: 0.14, treeLodScale: 0.3, viewDist: 0.4, envSize: 64, particles: 0.2, sunShafts: false },
+  mobile: { name: 'Mobile', msaa: 0, shadowSize: 1024, shadowRadius: 30, shadowFilter: 1.2, shadowTaps: 4, bloom: false, bloomLevels: 3, renderScale: 0.6, dprCap: 1, aniso: 1, maxTexSize: 512, treeDensity: 0.14, treeLodScale: 0.3, viewDist: 0.4, envSize: 64, particles: 0.2, sunShafts: false },
   ultra: { name: 'Ultra', msaa: 4, shadowSize: 4096, shadowRadius: 95, shadowFilter: 1.6, bloom: true, bloomLevels: 6, renderScale: 1.0, dprCap: 2, aniso: 16, maxTexSize: 2048, treeDensity: 1.0, treeLodScale: 1.0, viewDist: 1.0, envSize: 256, particles: 1.0, sunShafts: true },
   high: { name: 'High', msaa: 4, shadowSize: 2048, shadowRadius: 80, shadowFilter: 1.5, bloom: true, bloomLevels: 6, renderScale: 1.0, dprCap: 1.5, aniso: 8, maxTexSize: 2048, treeDensity: 0.8, treeLodScale: 0.85, viewDist: 0.85, envSize: 256, particles: 0.8, sunShafts: true },
   medium: { name: 'Medium', msaa: 2, shadowSize: 2048, shadowRadius: 65, shadowFilter: 1.4, bloom: true, bloomLevels: 5, renderScale: 0.85, dprCap: 1.25, aniso: 4, maxTexSize: 1024, treeDensity: 0.55, treeLodScale: 0.65, viewDist: 0.7, envSize: 128, particles: 0.6, sunShafts: false },
-  low: { name: 'Low', msaa: 0, shadowSize: 1024, shadowRadius: 50, shadowFilter: 1.3, bloom: true, bloomLevels: 4, renderScale: 0.7, dprCap: 1, aniso: 2, maxTexSize: 512, treeDensity: 0.3, treeLodScale: 0.45, viewDist: 0.55, envSize: 128, particles: 0.35, sunShafts: false },
+  low: { name: 'Low', msaa: 0, shadowSize: 1024, shadowRadius: 50, shadowFilter: 1.3, shadowTaps: 6, bloom: true, bloomLevels: 4, renderScale: 0.7, dprCap: 1, aniso: 2, maxTexSize: 512, treeDensity: 0.3, treeLodScale: 0.45, viewDist: 0.55, envSize: 128, particles: 0.35, sunShafts: false },
 };
 
 export class Material {
@@ -597,6 +597,7 @@ export class Renderer {
       d.FOLIAGE = instanced && mat.foliage ? true : undefined;
     }
     if (mat.tex.base) d.TEX_BASE = true;
+    d.SHADOW_TAPS = this.q.shadowTaps || 12;
     p = this.programs.get('uber', UBER_VS, UBER_FS, d);
     if (!p.initialized) {
       p.initialized = true;

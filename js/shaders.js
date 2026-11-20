@@ -1,6 +1,29 @@
 // All GLSL sources (WebGL2 / GLSL ES 3.00). The main "uber" shader handles glTF PBR materials,
 // instanced foliage (wind), terrain and road variants through #defines.
 
+// Output stage. Normal pipeline writes linear HDR into an offscreen buffer (tone-mapped later by COMPOSITE_FS).
+// LITE (mobile) pipeline tone-maps + grades right in the object shaders and draws straight to the screen.
+const OUT_GLSL = /* glsl */ `
+#ifdef LITE
+uniform vec4 uGradeA;      // x exposure, y saturation, z contrast, w flash amount
+uniform vec3 uGradeGain;
+uniform vec3 uGradeLift;
+uniform vec3 uFlashRGB;
+vec3 liteOut(vec3 c) {
+  c = c * uGradeA.x + uFlashRGB * uGradeA.w;
+  c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(vec3(l), c, uGradeA.y);
+  c = c * uGradeGain + uGradeLift * (1.0 - c);
+  c = (c - 0.5) * uGradeA.z + 0.5;
+  return pow(clamp(c, 0.0, 1.0), vec3(0.4545));
+}
+#define OUTC(c) liteOut(c)
+#else
+#define OUTC(c) ((c) * uOutScale)
+#endif
+`;
+
 export const UBER_VS = /* glsl */ `#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -76,6 +99,7 @@ uniform float uEmissiveBoost;
 uniform float uMipBoost;
 uniform float uWet;
 uniform float uOutScale;
+${OUT_GLSL}
 
 uniform sampler2D uTexBase;
 uniform sampler2D uTexNormal;
@@ -140,6 +164,9 @@ const vec2 POISSON[12] = vec2[12](
   vec2(0.507, 0.064), vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
 
 float shadowFactor(vec3 wp, vec3 N) {
+#ifdef NO_SHADOW
+  return 1.0;
+#else
   vec3 p = wp + N * uShadowParams.y;
   vec4 sc = uShadowMat * vec4(p, 1.0);
   vec3 q = sc.xyz * 0.5 + 0.5;
@@ -155,6 +182,7 @@ float shadowFactor(vec3 wp, vec3 N) {
   float s = sum / float(SHADOW_TAPS);
   float edge = min(min(q.x, 1.0 - q.x), min(q.y, 1.0 - q.y));
   return mix(1.0, s, smoothstep(0.0, 0.06, edge));
+#endif
 }
 
 float D_GGX(float NoH, float a) {
@@ -175,6 +203,19 @@ vec3 F_Schlick(vec3 F0, float VoH) {
 #ifdef TERRAIN
 vec3 terrainSurface(vec3 wp, vec3 N, vec4 w, out float rough, out float height) {
   vec2 uv = wp.xz;
+#ifdef LITE
+  // cheap: 4 texture reads, no noise, no bump
+  vec4 g = texture(uTexA, uv * 0.21);
+  vec4 g2 = texture(uTexA, uv * 0.037 + 0.31);
+  vec4 f = texture(uTexB, uv * 0.19);
+  vec4 r = texture(uTexC, uv * 0.16);
+  float tw = w.r + w.g + w.b + w.a + 1e-4;
+  vec3 col = (g.rgb * w.r + f.rgb * w.g + r.rgb * w.b + r.rgb * vec3(1.15, 1.08, 0.98) * w.a) / tw;
+  col *= 0.72 + 0.56 * g2.a;
+  height = 0.0;
+  rough = 0.93;
+  return col;
+#else
   vec4 g = texture(uTexA, uv * 0.21) * 0.6 + texture(uTexA, uv * 0.037 + 0.31) * 0.4;
   vec4 f = texture(uTexB, uv * 0.19) * 0.6 + texture(uTexB, uv * 0.041 + 0.17) * 0.4;
   vec4 r = texture(uTexC, uv * 0.16) * 0.6 + texture(uTexC, uv * 0.033 + 0.53) * 0.4;
@@ -186,6 +227,7 @@ vec3 terrainSurface(vec3 wp, vec3 N, vec4 w, out float rough, out float height) 
   col *= macro;
   rough = 0.93;
   return col;
+#endif
 }
 #endif
 
@@ -193,9 +235,14 @@ vec3 terrainSurface(vec3 wp, vec3 N, vec4 w, out float rough, out float height) 
 vec3 roadSurface(vec2 ruv, vec3 wp, out float rough, out float height, out float mark) {
   vec4 rt = texture(uTexA, ruv);
   vec4 d1 = texture(uTexB, wp.xz * 0.55);
+#ifdef LITE
+  vec3 col = rt.rgb * (0.82 + 0.34 * d1.r);
+  height = d1.a * 0.8;
+#else
   vec4 d2 = texture(uTexB, wp.xz * 0.07 + 0.5);
   vec3 col = rt.rgb * (0.82 + 0.34 * d1.r) * (0.9 + 0.2 * d2.g);
   height = d1.a * 0.8 + d2.a * 0.25;
+#endif
   float isMark = smoothstep(0.86, 0.94, rt.a);
   rough = mix(clamp(rt.a * (0.8 + 0.4 * d1.g), 0.05, 1.0), 0.42, isMark);
   mark = isMark;
@@ -276,7 +323,9 @@ void main() {
   vec3 tAlb = terrainSurface(wp, N, vColor, tRough, tHeight);
   base.rgb = tAlb;
   rough = tRough;
+#ifndef LITE
   N = bumpNormal(wp, N, tHeight, 0.07 * clamp(1.0 - dist * 0.025, 0.0, 1.0));
+#endif
 #endif
 
 #ifdef ROAD
@@ -285,11 +334,16 @@ void main() {
   base.rgb = rAlb;
   rough = rRough;
   // wet look: darker, glossier in patchy puddles
-  float puddle = smoothstep(0.35, 0.7, vnoise(wp.xz * 0.045) * 0.65 + vnoise(wp.xz * 0.21) * 0.35);
-  float wet = uWet * mix(0.5, 1.0, puddle) * (1.0 - rMark * 0.7);
-  base.rgb *= mix(1.0, 0.55, wet);
-  rough = mix(rough, 0.07 + 0.1 * (1.0 - puddle), wet);
+  float puddle = 0.0, wet = 0.0;
+  if (uWet > 0.01) {
+    puddle = smoothstep(0.35, 0.7, vnoise(wp.xz * 0.045) * 0.65 + vnoise(wp.xz * 0.21) * 0.35);
+    wet = uWet * mix(0.5, 1.0, puddle) * (1.0 - rMark * 0.7);
+    base.rgb *= mix(1.0, 0.55, wet);
+    rough = mix(rough, 0.07 + 0.1 * (1.0 - puddle), wet);
+  }
+#ifndef LITE
   N = bumpNormal(wp, N, rHeight, 0.012 * (1.0 - wet * 0.8) * clamp(1.0 - dist * 0.04, 0.0, 1.0));
+#endif
 #endif
 
 #ifdef TEX_NORMAL
@@ -391,6 +445,9 @@ void main() {
     #endif
     vec3 irr = textureLod(uEnvSpec, Nb, uAmbLod).rgb * uEnvIntensity * uAmbientTint;
     col += diffC * irr * ao;
+#if defined(LITE) && (defined(TERRAIN) || defined(INSTANCED))
+    if (false) {   // ground + trees: sky reflection is invisible on them, skip the second cubemap read
+#endif
     vec3 R = reflect(-V, N);
     float lod = clamp(rough * (uEnvMaxLod - 0.5), 0.0, uEnvMaxLod);
     vec3 pre = textureLod(uEnvSpec, R, lod).rgb * uEnvIntensity;
@@ -403,6 +460,9 @@ void main() {
     // reflections of the sky are suppressed in deep shadow / below horizon for non-metals
     float horizon = clamp(1.0 + R.y * 1.5, 0.0, 1.0);
     col += pre * (F0 * AB.x + AB.y) * specAO * mix(horizon, 1.0, metal);
+#if defined(LITE) && (defined(TERRAIN) || defined(INSTANCED))
+    }
+#endif
   }
 
   col += emissive;
@@ -421,12 +481,12 @@ void main() {
     // fresnel makes glass more reflective at grazing angles
     float fres = pow(1.0 - NoV, 4.0);
     alpha = clamp(alpha + fres * 0.6, 0.0, 1.0);
-    outColor = vec4(col * uOutScale, alpha);
+    outColor = vec4(OUTC(col), alpha);
   #else
     #ifdef A2C
-      outColor = vec4(col * uOutScale, base.a);
+      outColor = vec4(OUTC(col), base.a);
     #else
-      outColor = vec4(col * uOutScale, 1.0);
+      outColor = vec4(OUTC(col), 1.0);
     #endif
   #endif
 #endif
@@ -462,6 +522,7 @@ uniform vec3 uCloudDark;
 uniform float uCloudCover;
 uniform float uStars;
 uniform float uOutScale;
+${OUT_GLSL}
 uniform float uHorizonPow;
 
 float hash12(vec2 p) {
@@ -523,7 +584,11 @@ vec3 skyColor(vec3 d) {
 void main() {
   vec4 wp = uInvViewProj * vec4(vPos, 1.0, 1.0);
   vec3 dir = normalize(wp.xyz / wp.w - uCamPos);
+#ifdef LITE
+  outColor = vec4(OUTC(skyColor(dir)) + (hash12(gl_FragCoord.xy) - 0.5) / 255.0, 1.0);
+#else
   outColor = vec4(skyColor(dir) * uOutScale, 1.0);
+#endif
 }
 `;
 
@@ -574,6 +639,7 @@ in vec4 vColor;
 flat in float vKind;
 out vec4 outColor;
 uniform float uOutScale;
+${OUT_GLSL}
 uniform float uTime;
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * .1031);
@@ -603,7 +669,7 @@ void main() {
   } else {                      // glow
     a = exp(-r2 * 3.4) * edge;
   }
-  outColor = vec4(vColor.rgb * uOutScale, vColor.a * a);
+  outColor = vec4(OUTC(vColor.rgb), vColor.a * a);
 }
 `;
 
@@ -818,9 +884,10 @@ in vec2 vUV;
 in vec4 vColor;
 out vec4 outColor;
 uniform float uOutScale;
+${OUT_GLSL}
 void main() {
   float r2 = dot(vUV, vUV);
   float a = pow(max(1.0 - r2, 0.0), 2.2);
-  outColor = vec4(vColor.rgb * uOutScale, a * vColor.a);
+  outColor = vec4(OUTC(vColor.rgb), a * vColor.a);
 }
 `;

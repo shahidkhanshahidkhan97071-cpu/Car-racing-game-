@@ -8,7 +8,8 @@ import {
 } from './shaders.js';
 
 export const QUALITY_PRESETS = {
-  mobile: { name: 'Mobile', msaa: 0, shadowSize: 1024, shadowRadius: 30, shadowFilter: 1.2, shadowTaps: 4, bloom: false, bloomLevels: 3, renderScale: 0.6, dprCap: 1, aniso: 1, maxTexSize: 512, treeDensity: 0.14, treeLodScale: 0.3, viewDist: 0.4, envSize: 64, particles: 0.2, sunShafts: false },
+  // lite = NFS-style mobile path: no HDR buffer / post chain / shadow map, tone-mapping inside the object shaders, cheap terrain+road shading
+  mobile: { name: 'Mobile', lite: true, shadows: false, msaa: 0, shadowSize: 4, shadowRadius: 30, shadowFilter: 1.2, shadowTaps: 4, bloom: false, bloomLevels: 3, renderScale: 0.8, dprCap: 1, aniso: 1, maxTexSize: 512, treeDensity: 0.14, treeLodScale: 0.3, viewDist: 0.4, envSize: 64, particles: 0.2, sunShafts: false },
   ultra: { name: 'Ultra', msaa: 4, shadowSize: 4096, shadowRadius: 95, shadowFilter: 1.6, bloom: true, bloomLevels: 6, renderScale: 1.0, dprCap: 2, aniso: 16, maxTexSize: 2048, treeDensity: 1.0, treeLodScale: 1.0, viewDist: 1.0, envSize: 256, particles: 1.0, sunShafts: true },
   high: { name: 'High', msaa: 4, shadowSize: 2048, shadowRadius: 80, shadowFilter: 1.5, bloom: true, bloomLevels: 6, renderScale: 1.0, dprCap: 1.5, aniso: 8, maxTexSize: 2048, treeDensity: 0.8, treeLodScale: 0.85, viewDist: 0.85, envSize: 256, particles: 0.8, sunShafts: true },
   medium: { name: 'Medium', msaa: 2, shadowSize: 2048, shadowRadius: 65, shadowFilter: 1.4, bloom: true, bloomLevels: 5, renderScale: 0.85, dprCap: 1.25, aniso: 4, maxTexSize: 1024, treeDensity: 0.55, treeLodScale: 0.65, viewDist: 0.7, envSize: 128, particles: 0.6, sunShafts: false },
@@ -135,7 +136,10 @@ export class Renderer {
     this.qualityKey = qualityKey;
     this.state = { cull: null, blend: null, frontFace: null, depthWrite: true, a2c: false, program: null };
     this.boundTex = new Array(16).fill(null);
-    this.outScale = this.caps.hdr ? 1 : 0.2;
+    this.lite = !!this.q.lite;
+    this.useShadows = this.q.shadows !== false;
+    this.outScale = this.lite ? 1 : (this.caps.hdr ? 1 : 0.2);
+    this.grade = null;
     this.view = m4.create(); this.proj = m4.create(); this.viewProj = m4.create(); this.invViewProj = m4.create();
     this.camPos = [0, 0, 0];
     this.camRight = [1, 0, 0]; this.camUp = [0, 1, 0];
@@ -144,7 +148,7 @@ export class Renderer {
     this.shadowView = m4.create();
     this.shadowProj = m4.create();
     this.shadowFrustum = new Array(6);
-    this.shadowEnabled = true;
+    this.shadowEnabled = this.q.shadows !== false;
     this.env = null;            // current environment preset
     this.spots = [];
     this.passType = 'main';
@@ -178,6 +182,10 @@ export class Renderer {
   setQuality(key) {
     this.qualityKey = key;
     this.q = { ...QUALITY_PRESETS[key] };
+    this.lite = !!this.q.lite;
+    this.useShadows = this.q.shadows !== false;
+    this.shadowEnabled = this.useShadows;
+    this.outScale = this.lite ? 1 : (this.caps.hdr ? 1 : 0.2);
     this._createShadowTarget();
     this._createParticles();
     this.resize(true);
@@ -216,7 +224,20 @@ export class Renderer {
     const ch = Math.max(2, Math.floor(this.canvas.clientHeight * dpr));
     const scale = (this.dynScale || 1) * this.q.renderScale;
     const w = Math.max(2, Math.floor(cw * scale)), h = Math.max(2, Math.floor(ch * scale));
-    if (!force && this.canvas.width === cw && this.canvas.height === ch && this.w === w && this.h === h) return;
+    if (this.lite) {
+      // draw straight into a (smaller) canvas; the browser scales it up for free
+      if (!force && this.canvas.width === w && this.canvas.height === h && this.liteMode) return;
+      this.canvas.width = w; this.canvas.height = h;
+      this.cw = w; this.ch = h; this.w = w; this.h = h;
+      if (!this.liteMode) { this._freeTargets([this.msaa, this.resolve]); if (this.bloomLevels) this._freeTargets(this.bloomLevels); this.bloomLevels = []; }
+      this.liteMode = true;
+      this.msaa = { fbo: null, w, h, samples: 0 };
+      this.resolve = null;
+      this.samples = 0;
+      return;
+    }
+    if (!force && this.liteMode !== true && this.canvas.width === cw && this.canvas.height === ch && this.w === w && this.h === h) return;
+    this.liteMode = false;
     this.canvas.width = cw;
     this.canvas.height = ch;
     this.cw = cw; this.ch = ch;
@@ -378,8 +399,18 @@ export class Renderer {
     this.bakeEnvCube(env);
   }
 
-  _skyProgram() {
-    return this.programs.get('sky', SKY_VS, SKY_FS, {});
+  _skyProgram(bake = false) {
+    return this.programs.get('sky', SKY_VS, SKY_FS, !bake && this.lite ? { LITE: true } : {});
+  }
+
+  // grading uniforms used by the LITE output stage (tone-map + grade happen in the object shaders)
+  _setGrade(p) {
+    const g = this.grade || {};
+    const lift = g.lift || [0, 0, 0], gain = g.gain || [1, 1, 1], fc = g.flashColor || [1, 0.8, 0.5];
+    p.v4('uGradeA', g.exposure ?? 1, g.saturation ?? 1.05, g.contrast ?? 1.05, (g.flash || 0) * 0.6);
+    p.v3('uGradeGain', gain[0], gain[1], gain[2]);
+    p.v3('uGradeLift', lift[0], lift[1], lift[2]);
+    p.v3('uFlashRGB', fc[0], fc[1], fc[2]);
   }
 
   _setSkyUniforms(p, env, discClamp) {
@@ -395,7 +426,7 @@ export class Renderer {
     p.f('uCloudCover', env.cloudCover);
     p.f('uStars', env.stars);
     p.f('uHorizonPow', env.horizonPow ?? 4);
-    p.f('uOutScale', this.outScale);
+    p.f('uOutScale', this.caps.hdr ? 1 : 0.2); // env cube is always linear (HDR) or 0.2-scaled LDR
   }
 
   bakeEnvCube(env) {
@@ -413,7 +444,7 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
     const fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    const p = this._skyProgram();
+    const p = this._skyProgram(true);
     p.use();
     this._setSkyUniforms(p, env, 40);
     p.f('uTime', 0);
@@ -521,8 +552,9 @@ export class Renderer {
     this.passType = 'main';
   }
 
-  beginMainPass(clearColor = [0, 0, 0]) {
+  beginMainPass(clearColor = [0, 0, 0], grade = null) {
     const gl = this.gl;
+    this.grade = grade;
     this.passType = 'main';
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.msaa.fbo);
     gl.viewport(0, 0, this.w, this.h);
@@ -544,6 +576,7 @@ export class Renderer {
     p.use();
     this.state.program = null;
     this._setSkyUniforms(p, this.env, 0);
+    if (this.lite) this._setGrade(p);
     p.m4('uInvViewProj', this.invViewProj);
     p.v3('uCamPos', ...this.camPos);
     p.f('uTime', this.time);
@@ -570,7 +603,8 @@ export class Renderer {
   // ---- program variants ----
   _variant(mat, instanced) {
     const shadow = this.passType === 'shadow';
-    const key = (shadow ? 's' : 'm') + (instanced ? 'i' : 'n');
+    const lite = this.lite && !shadow;
+    const key = (shadow ? 's' : 'm') + (instanced ? 'i' : 'n') + (lite ? 'L' : '') + (lite && !this.useShadows ? 'N' : '');
     mat._variants = mat._variants || {};
     let p = mat._variants[key];
     if (p) return p;
@@ -581,7 +615,9 @@ export class Renderer {
     if (masked) d.ALPHA_MASK = true;
     if (!shadow) {
       if (mat.alphaMode === 'BLEND' && !mat.foliage) d.ALPHA_BLEND = true;
-      if (masked) d.A2C = true;
+      if (masked && !lite) d.A2C = true;
+      if (lite) d.LITE = true;
+      if (lite && !this.useShadows) d.NO_SHADOW = true;
       if (mat.doubleSided) d.DOUBLE_SIDED = true;
       if (mat.foliage) d.FOLIAGE = true;
       if (mat.paint) d.PAINT = true;
@@ -589,9 +625,10 @@ export class Renderer {
       if (mat.grain) d.GRAIN = true;
       if (mat.terrain) d.TERRAIN = true;
       if (mat.road) d.ROAD = true;
-      if (mat.tex.normal) d.TEX_NORMAL = true;
-      if (mat.tex.mr) d.TEX_MR = true;
-      if (mat.tex.occ) d.TEX_OCC = true;
+      const skipDetail = lite && instanced; // trees: no normal/ORM maps on mobile (tiny on screen)
+      if (mat.tex.normal && !skipDetail) d.TEX_NORMAL = true;
+      if (mat.tex.mr && !skipDetail) d.TEX_MR = true;
+      if (mat.tex.occ && !skipDetail) d.TEX_OCC = true;
       if (mat.tex.emis) d.TEX_EMIS = true;
     } else if (masked) {
       d.FOLIAGE = instanced && mat.foliage ? true : undefined;
@@ -632,6 +669,7 @@ export class Renderer {
     p.f('uFogDensity', e.fogDensity);
     p.v2('uFogHeight', e.fogHeightBase ?? 0, e.fogHeightFalloff ?? 0.004);
     p.f('uOutScale', this.outScale);
+    if (this.lite) this._setGrade(p);
     const n = Math.min(4, this.spots.length);
     p.i('uNumSpots', n);
     if (n > 0) {
@@ -744,11 +782,12 @@ export class Renderer {
   drawDecals(batch, first = 0, count = batch.n) {
     if (!batch || count <= 0) return;
     const gl = this.gl;
-    const p = this.programs.get('decal', DECAL_VS, DECAL_FS, {});
+    const p = this.programs.get('decal', DECAL_VS, DECAL_FS, this.lite ? { LITE: true } : {});
     p.use();
     this.state.program = null;
     p.m4('uViewProj', this.viewProj);
     p.f('uOutScale', this.outScale);
+    if (this.lite) this._setGrade(p);
     this.setCull(null);
     this.setBlend('add');
     gl.depthMask(false);
@@ -768,7 +807,7 @@ export class Renderer {
   // ---- particles ----
   drawParticles() {
     const gl = this.gl;
-    const p = this.programs.get('particle', PARTICLE_VS, PARTICLE_FS, {});
+    const p = this.programs.get('particle', PARTICLE_VS, PARTICLE_FS, this.lite ? { LITE: true } : {});
     p.use();
     this.state.program = null;
     p.m4('uViewProj', this.viewProj);
@@ -776,6 +815,7 @@ export class Renderer {
     p.v3('uCamRight', ...this.camRight);
     p.v3('uCamUp', ...this.camUp);
     p.f('uOutScale', this.outScale);
+    if (this.lite) this._setGrade(p);
     p.f('uTime', this.time);
     this.setCull(null);
     gl.depthMask(false);
@@ -796,6 +836,7 @@ export class Renderer {
 
   // ---- post ----
   post(pp) {
+    if (this.lite) return; // lite path already tone-mapped + graded in the object shaders
     const gl = this.gl;
     gl.disable(gl.DEPTH_TEST);
     this.setCull(null);

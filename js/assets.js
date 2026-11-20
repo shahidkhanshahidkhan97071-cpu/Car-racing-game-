@@ -37,6 +37,27 @@ function worldBounds(prim, world) {
   return { min: [minx, miny, minz], max: [maxx, maxy, maxz] };
 }
 
+// concatenate already-baked primitives (same material) into one primitive
+function mergePrims(list) {
+  const nv = list.reduce((n, x) => n + x.positions.length / 3, 0);
+  const ni = list.reduce((n, x) => n + x.indices.length, 0);
+  const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), col = new Float32Array(nv * 4).fill(1);
+  const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+  let vo = 0, io = 0;
+  for (const x of list) {
+    const n = x.positions.length / 3;
+    pos.set(x.positions, vo * 3); nor.set(x.normals, vo * 3);
+    if (x.uvs) uv.set(x.uvs.subarray ? x.uvs.subarray(0, n * 2) : x.uvs, vo * 2);
+    if (x.colors) {
+      const stride = x.colors.length / n;
+      for (let i = 0; i < n; i++) for (let c = 0; c < 4; c++) col[(vo + i) * 4 + c] = c < stride ? x.colors[i * stride + c] : 1;
+    }
+    for (let i = 0; i < x.indices.length; i++) idx[io + i] = x.indices[i] + vo;
+    vo += n; io += x.indices.length;
+  }
+  return { ...list[0], positions: pos, normals: nor, uvs: uv, colors: col, indices: idx, _cc: undefined };
+}
+
 // ============================ CARS ============================
 // cfg (optional, from <car>.json): { name, yaw, stats:{...}, wheelRadius, tags }
 export async function loadCar(renderer, url, cfg = {}) {
@@ -144,7 +165,7 @@ export async function loadCar(renderer, url, cfg = {}) {
     }
     let role = mat.role;
     if (role === 'lights') role = center[2] < 0 ? 'tail' : 'head';
-    parts.push({ mesh: primToMesh(gl, prim), mat, base: world, wheel: wheelIdx, role, center, name: prim.nodeName });
+    parts.push({ prim, mesh: null, mat, base: world, wheel: wheelIdx, role, center, name: prim.nodeName });
   }
   const wheelList = [...wheels.values()].sort((a, b) => a.index - b.index);
   // front axle = the pair with larger z
@@ -174,6 +195,25 @@ export async function loadCar(renderer, url, cfg = {}) {
   dims.taillights = tail.length ? [Math.max(...tail.map((c) => Math.abs(c[0]))) || 0.5, tail[0][1], bmin[2]] : [0.5, 0.8, bmin[2]];
   const head = parts.filter((p) => p.role === 'head').map((p) => p.center);
   dims.headlights = head.length ? [Math.max(0.55, ...head.map((c) => Math.abs(c[0]))), Math.max(...head.map((c) => c[1])), bmax[2]] : [0.6, 0.65, bmax[2]];
+  // merge parts that share (wheel, material, role): geometry is baked into place, so ~100 draw calls per car become ~15
+  const matIds = new Map();
+  const groups = new Map();
+  for (const p of parts) {
+    if (!matIds.has(p.mat)) matIds.set(p.mat, matIds.size);
+    const key = p.wheel + '|' + p.role + '|' + matIds.get(p.mat);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  }
+  const mergedParts = [];
+  const identity = m4.create();
+  for (const list of groups.values()) {
+    const baked = list.map((p) => bakePrim(p.prim, p.base));
+    const prim = baked.length === 1 ? baked[0] : mergePrims(baked);
+    const f = list[0];
+    mergedParts.push({ mesh: primToMesh(gl, prim), mat: f.mat, base: identity, wheel: f.wheel, role: f.role, center: f.center, name: f.name });
+  }
+  parts.length = 0;
+  parts.push(...mergedParts);
   const nameBase = url.split('/').pop().replace(/\.glb$/i, '');
   const car = {
     id: cfg.id || nameBase,
@@ -318,6 +358,13 @@ export async function loadTree(renderer, key, onStatus) {
     b.mat = await getMat(p.material);
     b.isFoliage = b.mat.foliage;
     baked.push(b);
+  }
+  // merge all primitives that share a material into one mesh -> far fewer draw calls per tree (fir_spruce had 35)
+  {
+    const groups = new Map();
+    for (const b of baked) { if (!groups.has(b.mat)) groups.set(b.mat, []); groups.get(b.mat).push(b); }
+    baked.length = 0;
+    for (const [mat, list] of groups) baked.push(list.length === 1 ? list[0] : { ...mergePrims(list), mat, isFoliage: list[0].isFoliage });
   }
   // crown radius (horizontal)
   let rad = 0;

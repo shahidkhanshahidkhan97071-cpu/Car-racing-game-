@@ -237,6 +237,7 @@ class Game {
     this._seg('segDiff', DIFFS.map((d, i) => ({ label: d.name, value: i })), () => S.diff, (v) => { S.diff = +v; save(); });
     this._seg('segQuality', ['mobile', 'low', 'medium', 'high', 'ultra'].map((k) => ({ label: QUALITY_PRESETS[k].name, value: k })), () => S.quality, (v) => { S.quality = v; S.qChosen = true; save(); this._qualityDirty = true; });
     this._seg('segDyn', [{ label: 'ON', value: 1 }, { label: 'OFF', value: 0 }], () => (S.dyn ? 1 : 0), (v) => { S.dyn = !!+v; save(); });
+    this._seg('segFps', [{ label: 'AUTO', value: 0 }, { label: '30', value: 30 }, { label: '60', value: 60 }], () => S.fps || 0, (v) => { S.fps = +v; this.autoCap = 0; save(); });
     this._seg('segFx', [{ label: 'ON', value: 1 }, { label: 'OFF', value: 0 }], () => (S.fx ? 1 : 0), (v) => { S.fx = !!+v; save(); });
     this._seg('segUnit', [{ label: 'KM/H', value: 'kmh' }, { label: 'MPH', value: 'mph' }], () => S.units, (v) => { S.units = v; save(); });
     const vol = (id, key) => {
@@ -499,8 +500,13 @@ class Game {
   }
 
   // ------------------------------------------------------------------ frame
+  // 30 / 60 fps limit (AUTO starts at 60 and drops to 30 when the GPU can't keep up even at minimum resolution)
+  get fpsCap() { const f = this.S.fps; return f === 30 ? 30 : f === 60 ? 60 : (this.autoCap || 60); }
+
   frame(now) {
     requestAnimationFrame((t) => this.frame(t));
+    const cap = this.fpsCap;
+    if (cap < 60 && now - this.last < 1000 / cap - 3) return; // skip this vsync, keeps frame pacing even
     let dt = (now - this.last) / 1000;
     this.last = now;
     if (!(dt > 0)) dt = 0.016;
@@ -536,8 +542,12 @@ class Game {
       const avg = this.dynAcc / this.dynFrames;
       this.dynFrames = 0; this.dynAcc = 0;
       let s = this.dynScale;
-      if (avg > 1 / 50) s = Math.max(0.55, s - (avg > 1 / 35 ? 0.12 : 0.06));
-      else if (avg < 1 / 66 && s < 1) s = Math.min(1, s + 0.04);
+      const tgt = 1 / this.fpsCap;
+      if (avg > tgt * 1.22) {
+        s = Math.max(0.55, s - (avg > tgt * 1.7 ? 0.12 : 0.06));
+        // already at minimum resolution and still slow -> AUTO switches to a steady 30 fps
+        if (s <= 0.56 && !this.S.fps && !this.autoCap && avg > 1 / 45) { this.autoCap = 30; s = 0.9; }
+      } else if (avg < tgt * 1.08 && s < 1) s = Math.min(1, s + 0.04);
       if (s !== this.dynScale) { this.dynScale = s; r.setDynamicScale(s); }
     }
   }
@@ -562,21 +572,25 @@ class Game {
     r.spots = [];
     const model = this._carMatrix({ x: 0, y: 0, z: 0, yaw: 0.0, pitch: 0, roll: 0, bodyPitch: 0, bodyRoll: 0 }, car);
     const st = { wheelSpin: 0, steer: Math.sin(this.time * 0.8) * 0.12, paint: paintUniform(PAINTS[this.paintIdx]), tail: env.night ? 1.4 : 0.6, head: env.night ? 2.5 : 0.8 };
-    r.updateShadow([0, 0, 0], 22);
-    r.beginShadowPass();
-    drawCar(r, car, model, st, false);
-    r.endShadowPass();
-    r.beginMainPass([0, 0, 0]);
+    const ppM = {
+      exposure: env.exposure * (env.night ? 1.0 : 0.92), bloom: env.bloom * 0.6, bloomThreshold: Math.max(env.bloomThreshold, 1.6), saturation: env.grade.saturation, lift: env.grade.lift,
+      gain: env.grade.gain, contrast: env.grade.contrast, vignette: 0.42, grain: 0.012,
+    };
+    if (r.useShadows) {
+      r.updateShadow([0, 0, 0], 22);
+      r.beginShadowPass();
+      drawCar(r, car, model, st, false);
+      r.endShadowPass();
+    }
+    r.beginMainPass([0, 0, 0], ppM);
     r.drawSky();
     r.drawMesh(this.floorMesh, this.floorMat, this.ident);
     r.drawMesh(this.padMesh, this.padMat, this.ident);
     drawCar(r, car, model, st, false);
+    if (!r.useShadows) drawContactShadow(r, { x: 0, y: 0, z: 0, yaw: 0 }, car, 0.7);
     drawCar(r, car, model, st, true);
     r.endMainPass();
-    r.post({
-      exposure: env.exposure * (env.night ? 1.0 : 0.92), bloom: env.bloom * 0.6, bloomThreshold: Math.max(env.bloomThreshold, 1.6), saturation: env.grade.saturation, lift: env.grade.lift,
-      gain: env.grade.gain, contrast: env.grade.contrast, vignette: 0.42, grain: 0.012,
-    });
+    r.post(ppM);
   }
 
   _carMatrix(v, car) {
@@ -926,16 +940,32 @@ class Game {
         r.spots.push({ pos: [px, hy, pz], dir: [fx_ / dl, tilt / dl, fz_ / dl], color: [34, 31, 24], range: 95, cosInner: Math.cos(9 * DEG), cosOuter: Math.cos(27 * DEG) });
       }
     }
+    const spd = P.speed, sr = clamp(spd / (P.topSpeedBase * 1.15), 0, 1.3);
+    const fxOn = this.S.fx;
+    const g = env.grade;
+    const pp = {
+      exposure: env.exposure, bloom: env.bloom, bloomThreshold: env.bloomThreshold,
+      saturation: g.saturation, lift: g.lift, gain: g.gain, contrast: g.contrast,
+      vignette: 0.3 + sr * 0.18 + P.nitroGlow * 0.12,
+      blur: fxOn ? Math.max(0, sr - 0.4) * 0.1 + P.nitroGlow * 0.07 + (P.boostTimer > 0 ? 0.015 : 0) : 0,
+      ca: fxOn ? 0.0015 + P.nitroGlow * 0.008 + Math.max(0, sr - 0.7) * 0.004 : 0.0008,
+      speedLines: fxOn ? clamp((sr - 0.55) * 1.6, 0, 1) * 0.6 + P.nitroGlow * 0.8 : 0,
+      flash: this.flash, flashColor: this.flashCol,
+      sunU: this.sunUV ? this.sunUV[0] : 0.5, sunV: this.sunUV ? this.sunUV[1] : 0.5, sunShaft: this.sunVis ? (env.sunShaft || 0) : 0,
+      blurCx: 0.5, blurCy: 0.46, grain: env.night ? 0.02 : 0.012,
+    };
     const focus = [P.x, P.y, P.z];
-    r.updateShadow(focus, r.q.shadowRadius);
-    r.beginShadowPass();
-    world.drawShadow(focus, this.eye);
-    for (const v of R.vehicles) {
-      if (v !== P && Math.hypot(v.x - P.x, v.z - P.z) > r.q.shadowRadius * 1.1) continue;
-      drawCar(r, v.model, this._carMatrix(v, v.model), { wheelSpin: v.wheelSpin, steer: v.steerVis, paint: v.paintU }, false);
+    if (r.useShadows) {
+      r.updateShadow(focus, r.q.shadowRadius);
+      r.beginShadowPass();
+      world.drawShadow(focus, this.eye);
+      for (const v of R.vehicles) {
+        if (v !== P && Math.hypot(v.x - P.x, v.z - P.z) > r.q.shadowRadius * 1.1) continue;
+        drawCar(r, v.model, this._carMatrix(v, v.model), { wheelSpin: v.wheelSpin, steer: v.steerVis, paint: v.paintU }, false);
+      }
+      r.endShadowPass();
     }
-    r.endShadowPass();
-    r.beginMainPass([0, 0, 0]);
+    r.beginMainPass([0, 0, 0], pp);
     r.drawSky();
     world.drawMain(this.eye);
     const night = env.night ? 1 : 0;
@@ -955,20 +985,7 @@ class Game {
     world.drawDecals();
     r.drawParticles();
     r.endMainPass();
-    const spd = P.speed, sr = clamp(spd / (P.topSpeedBase * 1.15), 0, 1.3);
-    const fxOn = this.S.fx;
-    const g = env.grade;
-    r.post({
-      exposure: env.exposure, bloom: env.bloom, bloomThreshold: env.bloomThreshold,
-      saturation: g.saturation, lift: g.lift, gain: g.gain, contrast: g.contrast,
-      vignette: 0.3 + sr * 0.18 + P.nitroGlow * 0.12,
-      blur: fxOn ? Math.max(0, sr - 0.4) * 0.1 + P.nitroGlow * 0.07 + (P.boostTimer > 0 ? 0.015 : 0) : 0,
-      ca: fxOn ? 0.0015 + P.nitroGlow * 0.008 + Math.max(0, sr - 0.7) * 0.004 : 0.0008,
-      speedLines: fxOn ? clamp((sr - 0.55) * 1.6, 0, 1) * 0.6 + P.nitroGlow * 0.8 : 0,
-      flash: this.flash, flashColor: this.flashCol,
-      sunU: this.sunUV ? this.sunUV[0] : 0.5, sunV: this.sunUV ? this.sunUV[1] : 0.5, sunShaft: this.sunVis ? (env.sunShaft || 0) : 0,
-      blurCx: 0.5, blurCy: 0.46, grain: env.night ? 0.02 : 0.012,
-    });
+    r.post(pp);
   }
 }
 

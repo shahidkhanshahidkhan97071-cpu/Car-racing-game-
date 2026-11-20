@@ -25,6 +25,8 @@ export class HUD {
     this.cache = {};
     this.towerT = 0;
     this.speedSmooth = 0;
+    this.touch = document.body.classList.contains('touch');
+    this.drawT = 0;
   }
   show() { this.root.classList.remove('hidden'); }
   hide() { this.root.classList.add('hidden'); }
@@ -117,8 +119,13 @@ export class HUD {
     e.nitroBar.classList.toggle('active', !!d.nitroOn);
     e.nitroBar.classList.toggle('full', nit > 98);
     e.wrong.classList.toggle('hidden', !d.wrongWay);
-    this._drawArc(d);
-    this._drawMinimap(d);
+    // canvas 2D HUD is costly on phones: redraw it ~20x per second instead of every frame
+    this.drawT -= dt;
+    if (!this.touch || this.drawT <= 0) {
+      this.drawT = 1 / 20;
+      this._drawArc(d);
+      this._drawMinimap(d);
+    }
     this.towerT -= dt;
     if (this.towerT <= 0) { this.towerT = 0.2; this._tower(d); }
   }
@@ -146,7 +153,7 @@ export class HUD {
       if (d.nitroOn) { grad.addColorStop(0, '#1b8cff'); grad.addColorStop(1, '#bff'); }
       else { grad.addColorStop(0, '#ffb347'); grad.addColorStop(0.55, '#ff7a1a'); grad.addColorStop(1, '#ff2d55'); }
       g.strokeStyle = grad; g.lineWidth = 20;
-      g.shadowColor = d.nitroOn ? '#22d3ff' : '#ff7a1a'; g.shadowBlur = 18;
+      if (!this.touch) { g.shadowColor = d.nitroOn ? '#22d3ff' : '#ff7a1a'; g.shadowBlur = 18; }
       g.beginPath(); g.arc(cx, cy, R, a0, a0 + sweep * f); g.stroke();
       g.shadowBlur = 0;
     }

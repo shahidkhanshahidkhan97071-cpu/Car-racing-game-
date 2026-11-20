@@ -72,6 +72,7 @@
       <h3>Graphics</h3>
       <div class="row"><label>Quality</label><div class="seg" id="segQuality"></div></div>
       <div class="row"><label>Dynamic resolution</label><div class="seg" id="segDyn"></div></div>
+      <div class="row"><label>Frame rate limit</label><div class="seg" id="segFps"></div></div>
       <div class="row"><label>Speed effects (blur / shake)</label><div class="seg" id="segFx"></div></div>
       <div class="row"><label>Speed unit</label><div class="seg" id="segUnit"></div></div>
       <h3>Audio</h3>
@@ -171,6 +172,6 @@ window.addEventListener('error', function (e) {
   d.textContent += (e.message || 'error') + ' @ ' + String(e.filename || '').split('/').slice(-2).join('/') + ':' + e.lineno + '\n';
 });
 </script>
-<script type="module" src="js/game.js?v=5"></script>
+<script type="module" src="js/game.js?v=6"></script>
 </body>
 </html>

@@ -4,7 +4,7 @@ export function createContext(canvas) {
   const opts = {
     antialias: false, // we do MSAA on our own render target
     alpha: false,
-    depth: false,
+    depth: true,  // default framebuffer depth is used by the lite (mobile) render path
     stencil: false,
     powerPreference: 'high-performance',
     preserveDrawingBuffer: false,

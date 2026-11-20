@@ -841,8 +841,9 @@ class Game {
       if (spd > 7) hd = p.yaw + wrapAngle(Math.atan2(p.vx, p.vz) - p.yaw) * 0.45;
       this.camYaw += wrapAngle(hd - this.camYaw) * damp(4.6, dt);
       const close = this.camMode === 1;
-      let dist = (close ? 5.6 : 7.7) + sr * (close ? 0.9 : 1.6) + p.nitroGlow * 0.9;
-      const height = (close ? 1.55 : 2.25) + sr * 0.15;
+      // low, tight chase cam (racing-game style): car big in the lower third, long road view ahead
+      let dist = (close ? 3.6 : 4.4) + sr * (close ? 0.5 : 0.7) + p.nitroGlow * 0.6;
+      const height = (close ? 1.05 : 1.3) + sr * 0.08;
       const cx = Math.sin(this.camYaw), cz = Math.cos(this.camYaw);
       const tx = p.x - cx * dist, tz = p.z - cz * dist;
       // soft follow (distance spring)
@@ -854,9 +855,9 @@ class Game {
       const gh = world.heightAt(this.camPos[0], this.camPos[2]) + 0.7;
       if (this.camPos[1] < gh) this.camPos[1] = gh;
       eye = this.camPos.slice();
-      const la = 7 + sr * 7;
-      look = [p.x + cx * la, p.y + (close ? 0.9 : 1.25), p.z + cz * la];
-      fov = 58 + sr * 17 + p.nitroGlow * 9 + (p.boostTimer > 0 ? 3 : 0);
+      const la = 15 + sr * 8;
+      look = [p.x + cx * la, p.y + (close ? 0.95 : 1.2), p.z + cz * la];
+      fov = (close ? 44 : 45) + sr * 12 + p.nitroGlow * 8 + (p.boostTimer > 0 ? 3 : 0);
       // intro fly-in
       if (this.state === 'countdown' && this.introT < 2.4) {
         const t = smoothstep(0, 2.4, this.introT);
